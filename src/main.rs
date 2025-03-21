@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
 use niri_ipc::{
-    Action, Event, PositionChange, Request, Response, SizeChange,
+    Action, Event, PositionChange, Request, Response, SizeChange, Window,
     socket::Socket,
     state::{EventStreamState, EventStreamStatePart},
 };
 use regex_lite::Regex;
 
-static BITWARDEN_REGEX: LazyLock<Regex> =
+static BITWARDEN_TITLE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\(Bitwarden Password Manager\) - Bitwarden").unwrap());
 
 fn main() -> anyhow::Result<()> {
@@ -22,17 +22,15 @@ fn main() -> anyhow::Result<()> {
 
     let mut state = EventStreamState::default();
 
-    log::debug!("listening");
-
     while let Ok(event) = event_stream() {
         let should_fix = should_fix(&event, &state);
 
         state.apply(event);
 
         if let Some(id) = should_fix {
-            log::debug!("Fixing bitwarden window");
-
-            fix_bitwarden(id)?;
+            if let Err(e) = float_window(id) {
+                log::error!("Failed to float window: {}", e);
+            }
         }
     }
 
@@ -51,25 +49,32 @@ fn should_fix(event: &Event, state: &EventStreamState) -> Option<u64> {
             }
         }
 
-        let is_bitwarden = window
-            .title
-            .as_ref()
-            .is_some_and(|title| BITWARDEN_REGEX.is_match(title));
-
-        let is_firefox = window.app_id.as_ref().is_some_and(|id| id == "firefox");
-
-        log::debug!("Bitwarden? {} Firefox? {}", is_bitwarden, is_bitwarden);
-        (is_bitwarden && is_firefox).then_some(window.id)
+        is_bitwarden(window).then_some(window.id)
     } else {
         None
     }
 }
 
-fn fix_bitwarden(id: u64) -> anyhow::Result<()> {
+fn is_bitwarden(window: &Window) -> bool {
+    let is_bitwarden = window
+        .title
+        .as_ref()
+        .is_some_and(|title| BITWARDEN_TITLE.is_match(title));
+
+    let is_firefox = window.app_id.as_ref().is_some_and(|id| id == "firefox");
+
+    log::debug!("Bitwarden? {} Firefox? {}", is_bitwarden, is_firefox);
+
+    is_bitwarden && is_firefox
+}
+
+fn float_window(id: u64) -> anyhow::Result<()> {
+    log::debug!("Floating window: {}", id);
+
     let (reply, _) = Socket::connect()?.send(Request::FocusedOutput)?;
 
     let Ok(Response::FocusedOutput(Some(output))) = reply else {
-        panic!("request for focused output denied");
+        anyhow::bail!("Request for focused output denied");
     };
 
     // float the window
