@@ -47,25 +47,32 @@ pub struct CompiledRule {
 
 impl CompiledRule {
     pub fn matches(&self, window: &Window) -> bool {
-        self.title(window) && self.app_id(window)
+        let title = self.title(window);
+        if matches!(title, Some(false)) {
+            return false;
+        }
+        let id = self.app_id(window);
+        if matches!(id, Some(false)) {
+            return false;
+        }
+
+        true
     }
 
-    fn title(&self, window: &Window) -> bool {
-        if let Some(title_rule) = &self.title {
-            window
-                .title
-                .as_ref()
-                .is_some_and(|title| title_rule.is_match(title))
-        } else {
-            false
-        }
+    fn title(&self, window: &Window) -> Option<bool> {
+        self.title
+            .as_ref()
+            .and_then(|title_rule| {
+                window
+                    .title
+                    .as_ref()
+                    .map(|title| title_rule.is_match(title))
+            })
     }
 
-    fn app_id(&self, window: &Window) -> bool {
-        if let Some(app_id_rule) = &self.app_id {
-            window.app_id.as_ref().is_some_and(|id| app_id_rule == id)
-        } else {
-            false
-        }
+    fn app_id(&self, window: &Window) -> Option<bool> {
+        self.app_id
+            .as_ref()
+            .and_then(|app_id_rule| window.app_id.as_ref().map(|id| app_id_rule == id))
     }
 }
