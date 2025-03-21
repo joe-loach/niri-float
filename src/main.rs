@@ -1,17 +1,32 @@
-use std::sync::LazyLock;
+mod config;
+mod rules;
 
+use anyhow::Context;
 use niri_ipc::{
     Action, Event, PositionChange, Request, Response, SizeChange, Window,
     socket::Socket,
     state::{EventStreamState, EventStreamStatePart},
 };
-use regex_lite::Regex;
 
-static BITWARDEN_TITLE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\(Bitwarden Password Manager\) - Bitwarden").unwrap());
+use rules::*;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
+
+    let Some(rules) = read_rules_from_config() else {
+        log::error!("Cannot find rules in config file, exiting");
+        log::error!(
+            "No rules at: {}",
+            config::rules_path().expect("no path to rules").display()
+        );
+        return Ok(());
+    };
+
+    let rules = rules
+        .into_iter()
+        .map(Rule::try_compile)
+        .collect::<Result<Vec<_>, _>>()
+        .context("One or more rules failed to compile")?;
 
     let (reply, mut event_stream) = Socket::connect()?.send(Request::EventStream)?;
 
@@ -23,7 +38,7 @@ fn main() -> anyhow::Result<()> {
     let mut state = EventStreamState::default();
 
     while let Ok(event) = event_stream() {
-        let should_fix = should_fix(&event, &state);
+        let should_fix = should_fix(&event, &state, &rules);
 
         state.apply(event);
 
@@ -37,7 +52,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn should_fix(event: &Event, state: &EventStreamState) -> Option<u64> {
+fn should_fix(event: &Event, state: &EventStreamState, rules: &[CompiledRule]) -> Option<u64> {
     if let Event::WindowOpenedOrChanged { window } = &event {
         if let Some(old) = state.windows.windows.get(&window.id) {
             let title_changed = old.title != window.title;
@@ -49,23 +64,20 @@ fn should_fix(event: &Event, state: &EventStreamState) -> Option<u64> {
             }
         }
 
-        is_bitwarden(window).then_some(window.id)
+        matches_any_rule(rules, window).then_some(window.id)
     } else {
         None
     }
 }
 
-fn is_bitwarden(window: &Window) -> bool {
-    let is_bitwarden = window
-        .title
-        .as_ref()
-        .is_some_and(|title| BITWARDEN_TITLE.is_match(title));
+fn matches_any_rule(rules: &[CompiledRule], window: &Window) -> bool {
+    for rule in rules {
+        if rule.matches(window) {
+            return true;
+        }
+    }
 
-    let is_firefox = window.app_id.as_ref().is_some_and(|id| id == "firefox");
-
-    log::debug!("Bitwarden? {} Firefox? {}", is_bitwarden, is_firefox);
-
-    is_bitwarden && is_firefox
+    false
 }
 
 fn float_window(id: u64) -> anyhow::Result<()> {
