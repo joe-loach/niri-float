@@ -84,3 +84,16 @@ fn satisfied(iter: impl IntoIterator<Item = Option<bool>>) -> bool {
     })
 }
 
+#[test]
+fn satisfied_all_cases() {
+    assert!(satisfied([Some(true), None, None]));
+    assert!(satisfied([Some(true), Some(true), None]));
+    assert!(satisfied([Some(true), Some(true), Some(true)]));
+    
+    assert!(!satisfied([]));
+    assert!(!satisfied([None]));
+    assert!(!satisfied([None, None, None]));
+    assert!(!satisfied([Some(false), None, None]));
+    assert!(!satisfied([Some(false), Some(false), None]));
+    assert!(!satisfied([Some(true), Some(false), None]));
+}
