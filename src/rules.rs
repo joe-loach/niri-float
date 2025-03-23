@@ -47,16 +47,12 @@ pub struct CompiledRule {
 
 impl CompiledRule {
     pub fn matches(&self, window: &Window) -> bool {
-        let title = self.title(window);
-        if matches!(title, Some(false)) {
-            return false;
-        }
-        let id = self.app_id(window);
-        if matches!(id, Some(false)) {
-            return false;
-        }
+        let conditions = [
+            self.title(window),
+            self.app_id(window),
+        ];
 
-        true
+        satisfied(conditions)
     }
 
     fn title(&self, window: &Window) -> Option<bool> {
@@ -76,3 +72,15 @@ impl CompiledRule {
             .and_then(|app_id_rule| window.app_id.as_ref().map(|id| app_id_rule == id))
     }
 }
+
+/// Only returns `true` when all values are `Some(true)`` or `None``.
+fn satisfied(iter: impl IntoIterator<Item = Option<bool>>) -> bool {
+    iter.into_iter().fold(false, |acc, tri| {
+        match tri {
+            Some(true) => acc | true,
+            Some(false) => acc & false,
+            None => acc | false,
+        }
+    })
+}
+
